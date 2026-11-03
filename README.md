@@ -1,6 +1,6 @@
 # ai-tools
 
-Small Python helpers for hashing, encryption, text formatting, and Nextcloud.
+[Open WebUI](https://github.com/open-webui/open-webui) tools for hashing, encryption, text formatting, and Nextcloud. Each module defines a `Tools` class that Open WebUI loads directly.
 
 | Module | What it does |
 | --- | --- |
