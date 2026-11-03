@@ -1,4 +1,9 @@
-"""Tests for MD5 and SHA-1 helpers."""
+"""
+title: Hashing tests
+description: Tests for MD5 and SHA-1 hashes of text, bytes, and files.
+requirements: pytest
+version: 0.1.0
+"""
 
 import hashlib
 from pathlib import Path

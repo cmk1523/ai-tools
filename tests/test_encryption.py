@@ -1,106 +1,90 @@
-"""Tests for AES-GCM helpers in encryption.py."""
+"""
+title: Encryption tests
+description: Tests for password encryption with Argon2id and AES-256-GCM.
+requirements: pytest, cryptography, argon2-cffi
+version: 0.2.0
+"""
+
+import base64
 
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from encryption import decrypt, encrypt
+from encryption import KEY_LEN, NONCE_LEN, SALT_LEN, Tools
 
-KEY_128 = "00112233445566778899aabbccddeeff"
-KEY_192 = "00112233445566778899aabbccddeeff0011223344556677"
-KEY_256 = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-IV = "0102030405060708090a0b0c"
+tools = Tools()
+decrypt = tools.decrypt
+encrypt = tools.encrypt
 
-
-def test_encrypt_empty_plaintext_matches_nist_vector():
-    # NIST SP 800-38D, AES-GCM test case 1: empty plaintext, zero key and nonce.
-    key = "00" * 16
-    iv = "00" * 12
-    assert encrypt("", key, iv) == "00000000000000000000000058E2FCCEFA7E3061367F1D57A4E7455A"
+PASSWORD = "correct horse battery staple"
 
 
-def test_roundtrip_with_hex_key_and_iv():
-    token = encrypt("hello", KEY_128, IV)
-    assert token == token.upper()
-    assert decrypt(token, KEY_128) == "hello"
-    assert decrypt(token.lower(), KEY_128.upper()) == "hello"
+def _payload(token: str) -> bytes:
+    return base64.b64decode(token)
 
 
-def test_roundtrip_with_raw_bytes_and_explicit_iv():
-    key = bytes.fromhex(KEY_256)
-    iv = bytes.fromhex(IV)
-    token = encrypt("secret", key, iv)
-    payload = bytes.fromhex(token)
-    ciphertext = payload[len(iv) :]
-    assert decrypt(ciphertext, key, iv) == "secret"
-    assert decrypt(ciphertext.hex(), key.hex(), iv.hex()) == "secret"
+def test_roundtrip_password_and_utf8_text():
+    token = encrypt("café 🔐", PASSWORD)
+    assert decrypt(token, PASSWORD) == "café 🔐"
 
 
-def test_roundtrip_aes_192_and_utf8_key():
-    key = "not-hex-key-material!!!!"  # 24 UTF-8 bytes, not valid hexadecimal
-    iv = b"nonce-12byte"
-    assert len(key.encode("utf-8")) == 24
-    assert decrypt(encrypt("café 🔐", key, iv), key, None) == "café 🔐"
+def test_empty_plaintext_roundtrips():
+    assert decrypt(encrypt("", PASSWORD), PASSWORD) == ""
 
 
-def test_key_lengths():
-    plaintext = "length check"
-    iv = IV
-    assert decrypt(encrypt(plaintext, KEY_128, iv), KEY_128) == plaintext
-    assert decrypt(encrypt(plaintext, KEY_192, iv), KEY_192) == plaintext
-    assert decrypt(encrypt(plaintext, KEY_256, iv), KEY_256) == plaintext
+def test_each_encryption_uses_a_fresh_salt_and_nonce():
+    first = _payload(encrypt("same", PASSWORD))
+    second = _payload(encrypt("same", PASSWORD))
+    assert first != second
+    assert first[:SALT_LEN] != second[:SALT_LEN]
+    assert first[SALT_LEN : SALT_LEN + NONCE_LEN] != second[SALT_LEN : SALT_LEN + NONCE_LEN]
 
 
-def test_nonstandard_nonce_requires_explicit_iv():
-    key = bytes.fromhex(KEY_128)
-    iv = b"0123456789abcdef"
-    token = encrypt("payload", key, iv)
-    ciphertext = bytes.fromhex(token)[len(iv) :]
-    assert decrypt(ciphertext, key, iv) == "payload"
+def test_payload_is_salt_nonce_and_tagged_ciphertext():
+    token = encrypt("layout", PASSWORD)
+    payload = _payload(token)
+    assert token == base64.b64encode(payload).decode("utf-8")
+    assert len(payload) >= SALT_LEN + NONCE_LEN + 16
+    # AES-GCM appends a 16-byte tag to the plaintext bytes.
+    assert len(payload) - SALT_LEN - NONCE_LEN == len("layout".encode("utf-8")) + 16
+
+
+def test_whitespace_in_base64_payload_is_ignored():
+    token = encrypt("trim", PASSWORD)
+    wrapped = "\n".join(token[i : i + 8] for i in range(0, len(token), 8))
+    assert decrypt(f"  {wrapped}  ", PASSWORD) == "trim"
+
+
+def test_wrong_password_and_tampered_payload_fail_authentication():
+    token = encrypt("authentic", PASSWORD)
     with pytest.raises(InvalidTag):
-        decrypt(token, key)
+        decrypt(token, "wrong password")
+
+    payload = bytearray(_payload(token))
+    payload[-1] ^= 0x01
+    flipped = base64.b64encode(payload).decode("utf-8")
+    with pytest.raises(InvalidTag):
+        decrypt(flipped, PASSWORD)
 
 
-def test_whitespace_around_hex_key_is_ignored():
-    padded = f"  {KEY_128.upper()}  "
-    assert decrypt(encrypt("trim", padded, IV), KEY_128) == "trim"
-
-
-def test_encrypt_rejects_non_string_text():
+def test_rejects_non_string_text_and_password():
     with pytest.raises(TypeError, match="text must be str"):
-        encrypt(b"bytes", KEY_128, IV)  # type: ignore[arg-type]
+        encrypt(b"bytes", PASSWORD)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="password must be str"):
+        encrypt("x", b"password")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="text must be str"):
+        decrypt(b"abc", PASSWORD)  # type: ignore[arg-type]
 
 
-def test_rejects_invalid_key_length_and_type():
-    with pytest.raises(ValueError, match="16, 24, or 32"):
-        encrypt("x", "abcd", IV)
-    with pytest.raises(ValueError, match="16, 24, or 32"):
-        decrypt("00" * 40, b"\x00" * 15, IV)
-    with pytest.raises(TypeError, match="key must be str or bytes"):
-        encrypt("x", 123, IV)  # type: ignore[arg-type]
-
-
-def test_rejects_empty_iv():
-    with pytest.raises(ValueError, match="iv must not be empty"):
-        encrypt("x", KEY_128, "")
-    with pytest.raises(ValueError, match="iv must not be empty"):
-        decrypt("00" * 32, KEY_128, b"")
-
-
-def test_decrypt_rejects_payload_too_short_for_embedded_iv():
+def test_rejects_invalid_base64_and_short_payload():
+    with pytest.raises(ValueError, match="Base64"):
+        decrypt("not base64 !!!", PASSWORD)
+    short = base64.b64encode(b"\x00" * (SALT_LEN + NONCE_LEN + 15)).decode("utf-8")
     with pytest.raises(ValueError, match="too short"):
-        decrypt("aabbcc", KEY_128)
+        decrypt(short, PASSWORD)
 
 
-def test_decrypt_rejects_tampered_ciphertext_and_wrong_key():
-    token = encrypt("authentic", KEY_128, IV)
-    flipped = token[:-1] + ("0" if token[-1] != "0" else "1")
-    with pytest.raises(InvalidTag):
-        decrypt(flipped, KEY_128)
-    with pytest.raises(InvalidTag):
-        decrypt(token, KEY_256)
-
-
-def test_embedded_iv_is_not_ciphertext_when_iv_is_passed_again():
-    token = encrypt("once", KEY_128, IV)
-    with pytest.raises(InvalidTag):
-        decrypt(token, KEY_128, IV)
+def test_derived_key_is_32_bytes():
+    salt = b"\x01" * SALT_LEN
+    assert len(tools._derive_key(PASSWORD, salt)) == KEY_LEN
+    assert tools._derive_key(PASSWORD, salt) == tools._derive_key(PASSWORD, salt)

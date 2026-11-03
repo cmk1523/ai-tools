@@ -1,10 +1,23 @@
-"""Tests for hexadecimal, Base64, CSV, and JSON helpers."""
+"""
+title: Formatting tests
+description: Tests for hexadecimal, Base64, CSV, and JSON helpers in formatting.py.
+requirements: pytest
+version: 0.1.0
+"""
 
 import json
 
 import pytest
 
-from formatting import csv_to_json, from_base64, from_hex, json_to_csv, to_base64, to_hex
+from formatting import Tools
+
+tools = Tools()
+csv_to_json = tools.csv_to_json
+from_base64 = tools.from_base64
+from_hex = tools.from_hex
+json_to_csv = tools.json_to_csv
+to_base64 = tools.to_base64
+to_hex = tools.to_hex
 
 
 def test_hex_roundtrip_is_uppercase():

@@ -1,9 +1,8 @@
 """
 title: Webpage Download to Nextcloud
-author: Open WebUI Developer
-version: 1.0.0
 description: Fetch a URL, strip CSS and scripts from HTML, and save the result to Nextcloud as download-YYYY-MM-DD.ext.
 requirements: beautifulsoup4, httpx, requests
+version: 1.0.0
 """
 
 from datetime import date
@@ -32,10 +31,21 @@ class Tools:
         )
 
     def __init__(self):
+        """
+        Load the Nextcloud connection settings.
+
+        :return: None.
+        """
         self.valves = self.Valves()
 
     @staticmethod
     def _strip_css_and_scripts(html: str) -> str:
+        """
+        Remove CSS, scripts, and inline event handlers from HTML.
+
+        :param html: The page HTML.
+        :return: The HTML with styles and scripts removed.
+        """
         soup = BeautifulSoup(html, "html.parser")
 
         for tag in soup(["script", "style", "noscript"]):
@@ -58,19 +68,37 @@ class Tools:
 
     @staticmethod
     def _download_filename(url: str) -> str:
-        """download-YYYY-MM-DD plus the URL path extension, or .htm when there is none."""
+        """
+        Build the Nextcloud file name for a downloaded page.
+        The name is download-YYYY-MM-DD plus the URL path extension, or .htm when there is none.
+
+        :param url: The page URL.
+        :return: The file name to store in Nextcloud.
+        """
         suffix = PurePosixPath(urlparse(url).path).suffix
         extension = suffix[1:] if len(suffix) > 1 else "htm"
         return f"download-{date.today().isoformat()}.{extension}"
 
     def _webdav_url(self, remote_path: str) -> str:
+        """
+        Build the WebDAV URL for a path in the user's files.
+
+        :param remote_path: Path relative to the user's files.
+        :return: The absolute WebDAV URL.
+        """
         parts = [quote(p) for p in remote_path.strip("/").split("/") if p]
         base = self.valves.NEXTCLOUD_URL.rstrip("/")
         user = quote(self.valves.NEXTCLOUD_USER)
         return f"{base}/remote.php/dav/files/{user}/" + "/".join(parts)
 
     def _ensure_folders(self, session: requests.Session, remote_path: str) -> None:
-        """Create each parent folder (MKCOL), ignoring ones that already exist."""
+        """
+        Create each parent folder (MKCOL), ignoring ones that already exist.
+
+        :param session: Authenticated session used for the WebDAV calls.
+        :param remote_path: File path whose parent folders should exist.
+        :return: None.
+        """
         current = ""
         for part in PurePosixPath(remote_path).parent.parts:
             if part in ("", "/"):
@@ -81,6 +109,14 @@ class Tools:
                 resp.raise_for_status()
 
     def _upload_file(self, remote_path: str, content: str) -> str:
+        """
+        Write a text file to the user's Nextcloud storage.
+        Missing folders are created, and an existing file at the same path is overwritten.
+
+        :param remote_path: Destination path relative to the user's files.
+        :param content: The text to write.
+        :return: A message saying whether the upload succeeded.
+        """
         session = requests.Session()
         session.auth = (self.valves.NEXTCLOUD_USER, self.valves.NEXTCLOUD_PASS)
 

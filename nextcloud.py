@@ -46,21 +46,43 @@ class Tools:
         )
 
     def __init__(self):
+        """
+        Load the Nextcloud connection settings.
+
+        :return: None.
+        """
         self.valves = self.Valves()
 
     def _session(self) -> requests.Session:
+        """
+        Open an HTTP session authenticated with the configured username and password.
+
+        :return: A requests session for WebDAV calls.
+        """
         session = requests.Session()
         session.auth = (self.valves.NEXTCLOUD_USER, self.valves.NEXTCLOUD_PASS)
         return session
 
     def _webdav_url(self, remote_path: str) -> str:
+        """
+        Build the WebDAV URL for a path in the user's files.
+
+        :param remote_path: Path relative to the user's files.
+        :return: The absolute WebDAV URL.
+        """
         parts = [quote(p) for p in remote_path.strip("/").split("/") if p]
         base = self.valves.NEXTCLOUD_URL.rstrip("/")
         user = quote(self.valves.NEXTCLOUD_USER)
         return f"{base}/remote.php/dav/files/{user}/" + "/".join(parts)
 
     def _ensure_folders(self, session: requests.Session, remote_path: str) -> None:
-        """Create each parent folder (MKCOL), ignoring ones that already exist."""
+        """
+        Create each parent folder (MKCOL), ignoring ones that already exist.
+
+        :param session: Authenticated session used for the WebDAV calls.
+        :param remote_path: File path whose parent folders should exist.
+        :return: None.
+        """
         current = ""
         for part in PurePosixPath(remote_path).parent.parts:
             if part in ("", "/"):
@@ -73,6 +95,12 @@ class Tools:
 
     @staticmethod
     def _format_size(length: str) -> str:
+        """
+        Turn a byte count into a short size such as "1.5 KB".
+
+        :param length: Byte count as text.
+        :return: A readable size, or an empty string when the count is not a number.
+        """
         try:
             size = int(length)
         except (TypeError, ValueError):
@@ -89,6 +117,12 @@ class Tools:
 
     @staticmethod
     def _prop(response: ET.Element) -> ET.Element | None:
+        """
+        Read the successful property set from a WebDAV response.
+
+        :param response: One DAV response element.
+        :return: The prop element with status 200, or None when there is none.
+        """
         for propstat in response.findall(f"{DAV}propstat"):
             status = propstat.findtext(f"{DAV}status") or ""
             if " 200 " in status:
