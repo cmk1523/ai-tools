@@ -1,13 +1,14 @@
 # ai-tools
 
-[Open WebUI](https://github.com/open-webui/open-webui) tools for hashing, encryption, text formatting, and Nextcloud. Each module defines a `Tools` class that Open WebUI loads directly.
+[Open WebUI](https://github.com/open-webui/open-webui) tools for hashing, encryption, compression, text formatting, and Nextcloud. Each module defines a `Tools` class that Open WebUI loads directly.
 
 | Module | What it does |
 | --- | --- |
 | `hashing.py` | MD5 and SHA-1 digests of text or bytes |
 | `encryption.py` | Password encrypt and decrypt. Argon2id stretches the password into an AES-256-GCM key |
+| `gzipfile.py` | Gzip compress and decompress one file at the highest compression level |
 | `formatting.py` | Hex, Base64, and CSV/JSON conversion |
-| `nextcloud.py` | List, read, write, and delete files over WebDAV |
+| `nextcloud.py` | List, read, write, and delete files over WebDAV, and gzip compress or decompress one file |
 | `download-webpage-store-in-nextcloud.py` | Fetch a page, strip CSS and scripts, and save it to Nextcloud |
 
 ## Setup
