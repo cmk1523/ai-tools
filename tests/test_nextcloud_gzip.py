@@ -1,12 +1,16 @@
 """
 title: Nextcloud gzip tests
-description: Tests for gzip compression and decompression of one Nextcloud file.
+description: Tests for gzip compression and decompression of one Nextcloud file, CNN Lite headline extraction, and downloading any URL into Nextcloud.
 requirements: pytest, requests
-version: 0.2.0
+version: 0.4.0
 """
 
 import gzip
+from datetime import date
+from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+import requests
 
 from nextcloud import Tools
 
@@ -230,3 +234,258 @@ def test_authentication_failure_is_reported():
     tools, fake = tool_with({"Notes/report.txt": b"text"})
     fake.status_override = 401
     assert "authentication failed" in tools.compress_file("Notes/report.txt")
+
+
+_SAMPLE = Path(__file__).resolve().parent / "download-2026-11-05.htm"
+_ONE_STORY = """
+<header class="header--lite"><span>11/5/2026</span></header>
+<li class="card--lite"><a href="/politics/story">One story</a></li>
+""".encode("utf-8")
+
+
+def test_extract_cnn_headlines_writes_csv_beside_the_html_file():
+    html = _SAMPLE.read_bytes()
+    tools, fake = tool_with({"Inbox/download-2026-11-05.htm": html})
+
+    message = tools.extract_cnn_headlines("/Inbox/download-2026-11-05.htm", "   ")
+    stored = fake.files["Inbox/download-2026-11-05.csv"].decode("utf-8")
+
+    assert message == (
+        "Extracted 100 headlines from Inbox/download-2026-11-05.htm "
+        "to Inbox/download-2026-11-05.csv in Nextcloud."
+    )
+    assert stored.startswith("headline,url,date\n")
+    assert stored.count("\n") == 101
+    assert "Tracking the House: See which races are still counting votes" in stored
+    assert fake.files["Inbox/download-2026-11-05.htm"] == html
+    assert "Inbox" in fake.folders
+
+
+def test_extract_cnn_headlines_uses_output_path_and_overwrites():
+    tools, fake = tool_with(
+        {
+            "Inbox/lite.HTML": _ONE_STORY,
+            "Out/headlines.csv": b"old",
+        }
+    )
+
+    message = tools.extract_cnn_headlines("Inbox/lite.HTML", "Out/headlines.csv")
+    stored = fake.files["Out/headlines.csv"].decode("utf-8")
+
+    assert message == (
+        "Extracted 1 headline from Inbox/lite.HTML "
+        "to Out/headlines.csv in Nextcloud. The existing file was overwritten."
+    )
+    assert stored == (
+        "headline,url,date\n"
+        "One story,https://www.cnn.com/politics/story,2026-11-05\n"
+    )
+    assert fake.files["Inbox/lite.HTML"] == _ONE_STORY
+    assert "Out" in fake.folders
+
+
+def test_extract_cnn_headlines_rejects_bad_input_without_uploading():
+    tools, fake = tool_with(
+        {
+            "Notes/page.txt": b"<html></html>",
+            "Notes/page.htm": b"\xff\xfe",
+            "Notes/undated.html": (
+                b'<li class="card--lite"><a href="/politics/story">No date here</a></li>'
+            ),
+        },
+        folders={"Notes", "Archive/saved.html"},
+    )
+
+    assert tools.extract_cnn_headlines("Notes/page.txt").startswith(
+        "Extract failed: Notes/page.txt must be a .htm or .html file."
+    )
+    assert tools.extract_cnn_headlines("Archive/saved.html").startswith(
+        "Extract failed: Archive/saved.html is a folder"
+    )
+    assert tools.extract_cnn_headlines("Notes/undated.html", "Notes").startswith(
+        "Extract failed: Notes is a folder"
+    )
+    assert tools.extract_cnn_headlines("missing.htm").startswith(
+        "Extract failed: missing.htm was not found."
+    )
+    assert tools.extract_cnn_headlines("Notes/../secret.htm").startswith(
+        "Extract failed:"
+    )
+    assert tools.extract_cnn_headlines("   ").startswith("Extract failed:")
+    assert tools.extract_cnn_headlines("Notes/page.htm", "Notes/page.htm").startswith(
+        "Extract failed: output path is the same"
+    )
+    assert (
+        tools.extract_cnn_headlines("Notes/page.htm")
+        == "Extract failed: Notes/page.htm is not UTF-8."
+    )
+    assert "No date near the top" in tools.extract_cnn_headlines("Notes/undated.html")
+    assert fake.puts == []
+
+
+def test_extract_cnn_headlines_reports_authentication_failure():
+    tools, fake = tool_with({"page.htm": _ONE_STORY})
+    fake.status_override = 401
+    assert "authentication failed" in tools.extract_cnn_headlines("page.htm")
+    assert "page.csv" not in fake.files
+
+
+class WebResponse:
+    def __init__(self, content: bytes, content_type: str, url: str, status_code: int = 200):
+        self.content = content
+        self.headers = {"content-type": content_type}
+        self.url = url
+        self.status_code = status_code
+
+    def iter_content(self, chunk_size: int = 1):
+        view = self.content
+        for start in range(0, len(view), chunk_size):
+            yield view[start : start + chunk_size]
+
+    def close(self) -> None:
+        return None
+
+
+def patch_fetch(monkeypatch, response: WebResponse | None = None, error: Exception | None = None):
+    def fake_get(url, headers=None, timeout=None, stream=None, allow_redirects=None):
+        del url, headers, timeout, stream, allow_redirects
+        if error is not None:
+            raise error
+        return response
+
+    monkeypatch.setattr("nextcloud.requests.get", fake_get)
+
+
+def test_webpage_downloader_strips_html_and_names_the_file_from_the_url(monkeypatch):
+    html = """
+    <html><head>
+      <style>body { color: red; }</style>
+      <link rel="stylesheet" href="/app.css">
+      <script>alert(1)</script>
+    </head>
+    <body style="margin:0" onclick="track()">
+      <!-- tracker -->
+      <p>Hello page</p>
+    </body></html>
+    """.encode("utf-8")
+    patch_fetch(
+        monkeypatch,
+        WebResponse(html, "text/html; charset=utf-8", "https://example.com/news/story.html"),
+    )
+    tools, fake = tool_with()
+
+    message = tools.webpage_downloader("  https://example.com/news/story.html  ")
+    name = f"download-{date.today().isoformat()}.html"
+    stored = fake.files[name].decode("utf-8")
+
+    assert message == (
+        "Downloaded https://example.com/news/story.html "
+        f"({len(fake.files[name])} bytes) to {name} in Nextcloud."
+    )
+    assert "Hello page" in stored
+    assert "<script" not in stored
+    assert "<style" not in stored
+    assert "stylesheet" not in stored
+    assert "onclick" not in stored
+    assert "tracker" not in stored
+    assert "margin" not in stored
+
+
+def test_webpage_downloader_stores_any_url_bytes_and_uses_output_path(monkeypatch):
+    payload = b"%PDF-1.4\n%\x00\x01 binary"
+    patch_fetch(
+        monkeypatch,
+        WebResponse(payload, "application/pdf", "https://cdn.example/files/report.PDF?download=1"),
+    )
+    tools, fake = tool_with({"Inbox/saved.pdf": b"old"})
+
+    message = tools.webpage_downloader(
+        "https://cdn.example/files/report.PDF?download=1",
+        " /Inbox/saved.pdf ",
+    )
+
+    assert message == (
+        "Downloaded https://cdn.example/files/report.PDF?download=1 "
+        f"({len(payload)} bytes) to Inbox/saved.pdf in Nextcloud. "
+        "The existing file was overwritten."
+    )
+    assert fake.files["Inbox/saved.pdf"] == payload
+    assert "Inbox" in fake.folders
+
+
+def test_webpage_downloader_names_extensionless_urls_from_the_response_type(monkeypatch):
+    png = b"\x89PNG\r\n\x1a\nrest"
+    patch_fetch(
+        monkeypatch,
+        WebResponse(
+            png,
+            "image/png",
+            "https://images.example/render?id=9",
+        ),
+    )
+    tools, fake = tool_with()
+
+    tools.webpage_downloader("https://images.example/render?id=9")
+
+    name = f"download-{date.today().isoformat()}.png"
+    assert fake.files[name] == png
+
+
+def test_webpage_downloader_follows_the_final_url_extension(monkeypatch):
+    patch_fetch(
+        monkeypatch,
+        WebResponse(b"plain text", "text/plain", "https://example.com/moved/notes.txt"),
+    )
+    tools, fake = tool_with()
+
+    tools.webpage_downloader("https://example.com/start")
+
+    name = f"download-{date.today().isoformat()}.txt"
+    assert fake.files[name] == b"plain text"
+
+
+def test_webpage_downloader_rejects_bad_urls_without_uploading(monkeypatch):
+    def fail_get(*_args, **_kwargs):
+        raise AssertionError("the URL should not be fetched")
+
+    monkeypatch.setattr("nextcloud.requests.get", fail_get)
+    tools, fake = tool_with(folders={"Inbox/page.htm"})
+
+    assert tools.webpage_downloader("").startswith("Webpage download failed: provide a URL")
+    assert tools.webpage_downloader("ftp://example.com/file").startswith(
+        "Webpage download failed: provide a full http or https URL"
+    )
+    assert tools.webpage_downloader("https://example.com/file", "Inbox/../secret.txt").startswith(
+        "Webpage download failed:"
+    )
+    assert tools.webpage_downloader("https://example.com/file", "Inbox/page.htm").startswith(
+        "Webpage download failed: Inbox/page.htm is a folder"
+    )
+    assert fake.puts == []
+
+
+def test_webpage_downloader_reports_fetch_and_upload_failures(monkeypatch):
+    tools, fake = tool_with()
+    patch_fetch(monkeypatch, error=requests.ConnectionError("timed out"))
+    assert tools.webpage_downloader("https://example.com/down").startswith(
+        "Webpage download failed: could not fetch the URL"
+    )
+    assert fake.puts == []
+
+    patch_fetch(
+        monkeypatch,
+        WebResponse(b"nope", "text/html", "https://example.com/missing", status_code=404),
+    )
+    assert (
+        tools.webpage_downloader("https://example.com/missing")
+        == "Webpage download failed: HTTP 404"
+    )
+    assert fake.puts == []
+
+    patch_fetch(
+        monkeypatch,
+        WebResponse(b"<html><p>Hi</p></html>", "text/html", "https://example.com/page.html"),
+    )
+    fake.status_override = 401
+    assert "authentication failed" in tools.webpage_downloader("https://example.com/page.html")
+    assert fake.puts == []
