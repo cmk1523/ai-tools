@@ -9,7 +9,6 @@
 | `gzipfile.py` | Gzip compress and decompress one file at the highest compression level |
 | `formatting.py` | Hex, Base64, and CSV/JSON conversion |
 | `nextcloud.py` | List, read, write, and delete files over WebDAV, gzip compress or decompress one file, extract CNN Lite headlines to CSV, and download any URL into Nextcloud |
-| `cnn-lite-news-extractor.py` | Read a CNN Lite `.htm` or `.html` file and return headlines, URLs, and dates as CSV |
 
 ## Setup
 

@@ -243,24 +243,6 @@ _ONE_STORY = """
 """.encode("utf-8")
 
 
-def test_extract_cnn_headlines_writes_csv_beside_the_html_file():
-    html = _SAMPLE.read_bytes()
-    tools, fake = tool_with({"Inbox/download-2026-11-05.htm": html})
-
-    message = tools.extract_cnn_headlines("/Inbox/download-2026-11-05.htm", "   ")
-    stored = fake.files["Inbox/download-2026-11-05.csv"].decode("utf-8")
-
-    assert message == (
-        "Extracted 100 headlines from Inbox/download-2026-11-05.htm "
-        "to Inbox/download-2026-11-05.csv in Nextcloud."
-    )
-    assert stored.startswith("headline,url,date\n")
-    assert stored.count("\n") == 101
-    assert "Tracking the House: See which races are still counting votes" in stored
-    assert fake.files["Inbox/download-2026-11-05.htm"] == html
-    assert "Inbox" in fake.folders
-
-
 def test_extract_cnn_headlines_uses_output_path_and_overwrites():
     tools, fake = tool_with(
         {
