@@ -1,0 +1,19 @@
+{
+  "name": "lmstudio-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lmstudio.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node lmstudio.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@json2csv/plainjs": "^7.0.8",
+    "@json2csv/transforms": "^7.0.8",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  }
+}

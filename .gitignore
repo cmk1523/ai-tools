@@ -39,3 +39,7 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Node
+node_modules/
+lmstudio/*.log

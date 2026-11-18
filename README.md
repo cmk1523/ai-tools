@@ -21,3 +21,13 @@ pip install cryptography argon2-cffi requests pydantic beautifulsoup4
 ```bash
 pytest
 ```
+
+## LM Studio MCP server
+
+`lmstudio/lmstudio.js` is an MCP server (stdio) with three tools: `get_current_date`, `web_search` (DuckDuckGo Lite), and `json_to_csv`.
+
+```bash
+cd lmstudio
+npm install
+npm test
+```
